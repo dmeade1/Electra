@@ -8,204 +8,225 @@ import {
   Animated,
   Dimensions,
   StatusBar,
-  ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import Svg, { Circle, Line, G, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { ElectraOrb } from '../components/common/ElectraOrb';
 import { theme } from '../styles/theme';
 
-const { height: screenHeight } = Dimensions.get('window');
+const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
 
 interface VoiceScreenProps {
   navigation: any;
 }
 
+// Background neural network component
+const NeuralBackground: React.FC = () => {
+  const backgroundNodes = useRef<Array<{ x: number; y: number; connections: number[] }>>([]);
+  
+  // Generate background neural network
+  if (backgroundNodes.current.length === 0) {
+    for (let i = 0; i < 15; i++) {
+      backgroundNodes.current.push({
+        x: Math.random() * screenWidth,
+        y: Math.random() * screenHeight,
+        connections: [],
+      });
+    }
+    
+    // Create connections
+    backgroundNodes.current.forEach((node, index) => {
+      const connectionCount = 2 + Math.floor(Math.random() * 2);
+      for (let i = 0; i < connectionCount; i++) {
+        const targetIndex = Math.floor(Math.random() * backgroundNodes.current.length);
+        if (targetIndex !== index) {
+          node.connections.push(targetIndex);
+        }
+      }
+    });
+  }
+
+  return (
+    <View style={StyleSheet.absoluteFillObject}>
+      <Svg width={screenWidth} height={screenHeight} style={StyleSheet.absoluteFillObject}>
+        <Defs>
+          <RadialGradient id="bgNodeGlow" cx="50%" cy="50%">
+            <Stop offset="0%" stopColor="#0030FF" stopOpacity="0.3" />
+            <Stop offset="100%" stopColor="#0020FF" stopOpacity="0" />
+          </RadialGradient>
+        </Defs>
+        
+        {/* Connections */}
+        <G opacity={0.1}>
+          {backgroundNodes.current.map((node, index) => 
+            node.connections.map((targetIndex, connIndex) => {
+              const target = backgroundNodes.current[targetIndex];
+              return (
+                <Line
+                  key={`${index}-${connIndex}`}
+                  x1={node.x}
+                  y1={node.y}
+                  x2={target.x}
+                  y2={target.y}
+                  stroke="#0030FF"
+                  strokeWidth={0.5}
+                />
+              );
+            })
+          )}
+        </G>
+        
+        {/* Nodes */}
+        <G opacity={0.2}>
+          {backgroundNodes.current.map((node, index) => (
+            <G key={index}>
+              <Circle
+                cx={node.x}
+                cy={node.y}
+                r={15}
+                fill="url(#bgNodeGlow)"
+              />
+              <Circle
+                cx={node.x}
+                cy={node.y}
+                r={2}
+                fill="#0050FF"
+              />
+            </G>
+          ))}
+        </G>
+      </Svg>
+    </View>
+  );
+};
+
 export const VoiceScreen: React.FC<VoiceScreenProps> = ({ navigation }) => {
   const [isListening, setIsListening] = useState(false);
-  const [showWelcome, setShowWelcome] = useState(true);
+  
+  // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(50)).current;
-  const swipeHintAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    // Welcome animation
-    Animated.sequence([
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 1500,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 1500,
-          useNativeDriver: true,
-        }),
-      ]),
-      Animated.delay(1000),
-      Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-    ]).start(() => {
-      setShowWelcome(false);
-      // Show main interface
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 1000,
-        useNativeDriver: true,
-      }).start();
-    });
-
-    // Swipe hint animation
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(swipeHintAnim, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(swipeHintAnim, {
-          toValue: 0,
-          duration: 2000,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-  }, []);
-
-  const handleVoicePress = () => {
-    setIsListening(!isListening);
-    // Voice recognition logic here
-  };
-
+  const welcomeSlide = useRef(new Animated.Value(-30)).current;
+  const orbScale = useRef(new Animated.Value(0.8)).current;
+  const subtitleFade = useRef(new Animated.Value(0)).current;
+  
   const navigateToDashboard = () => {
     navigation.navigate('MainTabs');
   };
 
-  const voiceCommands = [
-    "What's the market doing?",
-    "Buy 100 shares of AAPL",
-    "Show my portfolio performance",
-    "What's trending today?",
-    "Execute my morning trades",
-    "Analysis on TSLA",
-  ];
+  useEffect(() => {
+    // Entrance animations
+    Animated.sequence([
+      // Welcome text slides down and fades in
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 800,
+          delay: 300,
+          useNativeDriver: true,
+        }),
+        Animated.spring(welcomeSlide, {
+          toValue: 0,
+          friction: 8,
+          tension: 40,
+          delay: 300,
+          useNativeDriver: true,
+        }),
+      ]),
+      // Orb scales up
+      Animated.spring(orbScale, {
+        toValue: 1,
+        friction: 6,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+      // Subtitle fades in
+      Animated.timing(subtitleFade, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
+
+  const handleOrbPress = () => {
+    setIsListening(!isListening);
+  };
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
       
       <LinearGradient
-        colors={['#000000', '#000000'] as const}
+        colors={['#000000', '#000411', '#000824', '#000411', '#000000'] as const}
         style={styles.gradient}
+        locations={[0, 0.2, 0.5, 0.8, 1]}
       >
-        {/* Welcome Message */}
-        {showWelcome && (
+        {/* Neural background */}
+        <NeuralBackground />
+        
+        {/* Main content */}
+        <View style={styles.content}>
+          {/* Welcome Text - Above the orb */}
           <Animated.View
             style={[
               styles.welcomeContainer,
               {
                 opacity: fadeAnim,
-                transform: [{ translateY: slideAnim }],
+                transform: [{ translateY: welcomeSlide }],
               },
             ]}
           >
             <Text style={styles.welcomeText}>Welcome to Electra</Text>
           </Animated.View>
-        )}
 
-        {/* Main Interface */}
-        {!showWelcome && (
-          <Animated.View style={[styles.mainContent, { opacity: fadeAnim }]}>
-            {/* Trading Status Bar */}
-            <View style={styles.statusBar}>
-              <View style={styles.marketStatus}>
-                <View style={[styles.statusDot, { backgroundColor: theme.colors.trading.profit }]} />
-                <Text style={styles.statusText}>Markets Open</Text>
-              </View>
-              <Text style={styles.timeText}>9:34 AM EST</Text>
-            </View>
-
-            {/* Orb Section */}
-            <View style={styles.orbSection}>
-              <TouchableOpacity onPress={handleVoicePress} activeOpacity={0.9}>
-                <ElectraOrb isListening={isListening} />
-              </TouchableOpacity>
-              
-              <Animated.View style={styles.promptContainer}>
-                {isListening ? (
-                  <Text style={styles.listeningText}>Listening...</Text>
-                ) : (
-                  <>
-                    <Text style={styles.mainPrompt}>Say Anything</Text>
-                    <Text style={styles.subPrompt}>Voice-powered trading at your command</Text>
-                  </>
-                )}
-              </Animated.View>
-            </View>
-
-            {/* Voice Command Suggestions */}
-            {!isListening && (
-              <View style={styles.suggestionsContainer}>
-                <Text style={styles.suggestionsTitle}>Try saying:</Text>
-                <ScrollView 
-                  horizontal 
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.suggestionsList}
-                >
-                  {voiceCommands.map((command, index) => (
-                    <View key={index} style={styles.suggestionChip}>
-                      <Text style={styles.suggestionText}>"{command}"</Text>
-                    </View>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-            {/* Quick Stats */}
-            {!isListening && (
-              <View style={styles.quickStats}>
-                <View style={styles.statItem}>
-                  <Text style={styles.statLabel}>Portfolio</Text>
-                  <Text style={[styles.statValue, { color: theme.colors.trading.profit }]}>
-                    +4.2%
-                  </Text>
-                </View>
-                <View style={styles.statDivider} />
-                <View style={styles.statItem}>
-                  <Text style={styles.statLabel}>Day's P&L</Text>
-                  <Text style={[styles.statValue, { color: theme.colors.trading.profit }]}>
-                    +$2,847
-                  </Text>
-                </View>
-                <View style={styles.statDivider} />
-                <View style={styles.statItem}>
-                  <Text style={styles.statLabel}>Open Positions</Text>
-                  <Text style={styles.statValue}>12</Text>
-                </View>
-              </View>
-            )}
-
-            {/* Swipe Hint */}
-            <TouchableOpacity 
-              style={styles.swipeHint} 
-              onPress={navigateToDashboard}
-            >
-              <Animated.View
-                style={{
-                  opacity: swipeHintAnim,
-                }}
-              >
-                <Text style={styles.swipeText}>Swipe up for interactive dashboard</Text>
-                <View style={styles.swipeIndicator}>
-                  <View style={styles.swipeLine} />
-                </View>
-              </Animated.View>
+          {/* Main Orb */}
+          <Animated.View
+            style={[
+              styles.orbContainer,
+              {
+                opacity: fadeAnim,
+                transform: [{ scale: orbScale }],
+              },
+            ]}
+          >
+            <TouchableOpacity onPress={handleOrbPress} activeOpacity={0.9}>
+              <ElectraOrb isListening={isListening} />
             </TouchableOpacity>
           </Animated.View>
-        )}
+
+          {/* Subtitle */}
+          <Animated.View
+            style={[
+              styles.subtitleContainer,
+              {
+                opacity: subtitleFade,
+              },
+            ]}
+          >
+            {isListening ? (
+              <Text style={styles.listeningText}>Listening...</Text>
+            ) : (
+              <Text style={styles.speakText}>Speak or Ask Anything</Text>
+            )}
+          </Animated.View>
+
+          {/* Swipe hint */}
+          <Animated.View
+            style={[
+              styles.swipeContainer,
+              {
+                opacity: subtitleFade,
+              },
+            ]}
+          >
+            <TouchableOpacity onPress={navigateToDashboard} style={styles.swipeButton}>
+              <Text style={styles.swipeText}>Swipe to access interactive dashboard</Text>
+              <View style={styles.swipeIndicator}>
+                <View style={styles.swipeLine} />
+              </View>
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
       </LinearGradient>
     </View>
   );
@@ -219,151 +240,77 @@ const styles = StyleSheet.create({
   gradient: {
     flex: 1,
   },
-  welcomeContainer: {
+  content: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
+    paddingTop: screenHeight * 0.12,
+  },
+  welcomeContainer: {
+    marginBottom: 40,
   },
   welcomeText: {
     fontSize: 42,
+    fontWeight: '200',
+    color: '#FFFFFF',
+    letterSpacing: 3,
+    textAlign: 'center',
+    textShadowColor: '#0050FF',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 20,
+  },
+  orbContainer: {
+    marginBottom: 30,
+    shadowColor: '#0050FF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 30,
+  },
+  subtitleContainer: {
+    marginBottom: 60,
+  },
+  speakText: {
+    fontSize: 20,
     fontWeight: '300',
-    color: '#FFFFFF',
-    letterSpacing: 2,
-  },
-  mainContent: {
-    flex: 1,
-  },
-  statusBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 50,
-    paddingBottom: 20,
-  },
-  marketStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  statusText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-  },
-  timeText: {
-    color: '#6B7280',
-    fontSize: 14,
-  },
-  orbSection: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingBottom: 60,
-  },
-  promptContainer: {
-    marginTop: 40,
-    alignItems: 'center',
-  },
-  mainPrompt: {
-    fontSize: 36,
-    fontWeight: '300',
-    color: '#FFFFFF',
-    marginBottom: 8,
-    letterSpacing: 1,
-  },
-  subPrompt: {
-    fontSize: 16,
-    color: '#6B7280',
-    letterSpacing: 0.5,
+    color: '#A6B0C3',
+    letterSpacing: 1.5,
+    textAlign: 'center',
   },
   listeningText: {
-    fontSize: 28,
-    color: theme.colors.primary.main,
-    letterSpacing: 1,
-  },
-  suggestionsContainer: {
-    paddingBottom: 24,
-  },
-  suggestionsTitle: {
-    fontSize: 14,
-    color: '#6B7280',
+    fontSize: 22,
+    fontWeight: '400',
+    color: '#00D4FF',
+    letterSpacing: 2,
     textAlign: 'center',
-    marginBottom: 12,
+    textShadowColor: '#00D4FF',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
   },
-  suggestionsList: {
-    paddingHorizontal: 24,
-  },
-  suggestionChip: {
-    backgroundColor: 'rgba(0, 212, 255, 0.1)',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    marginHorizontal: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 212, 255, 0.2)',
-  },
-  suggestionText: {
-    color: theme.colors.primary.light,
-    fontSize: 14,
-  },
-  quickStats: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    marginHorizontal: 24,
-    marginBottom: 40,
-    paddingVertical: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginBottom: 4,
-  },
-  statValue: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  statDivider: {
-    width: 1,
-    height: 30,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  swipeHint: {
+  swipeContainer: {
     position: 'absolute',
-    bottom: 40,
-    left: 0,
-    right: 0,
+    bottom: 50,
     alignItems: 'center',
+  },
+  swipeButton: {
+    alignItems: 'center',
+    padding: 10,
   },
   swipeText: {
     fontSize: 14,
-    color: '#6B7280',
+    color: '#4A5568',
     marginBottom: 12,
+    letterSpacing: 0.5,
   },
   swipeIndicator: {
     width: 40,
-    height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 2,
+    height: 3,
+    backgroundColor: 'rgba(74, 85, 104, 0.3)',
+    borderRadius: 1.5,
+    overflow: 'hidden',
   },
   swipeLine: {
     width: '100%',
     height: '100%',
-    backgroundColor: 'rgba(255, 255, 255, 0.4)',
-    borderRadius: 2,
+    backgroundColor: 'rgba(74, 85, 104, 0.6)',
+    borderRadius: 1.5,
   },
 });

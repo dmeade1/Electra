@@ -1,7 +1,9 @@
+// App.tsx
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import { HomeScreen } from './src/screens/HomeScreen';
+import { VoiceScreen } from '/Users/andrewmeade/Desktop/Electra/src/screens/VoiceScreen';
+import { TabNavigator } from '/Users/andrewmeade/Desktop/Electra/src/components/navigation/TabNavigator';
 
 const Stack = createStackNavigator();
 
@@ -11,9 +13,13 @@ export default function App() {
       <Stack.Navigator
         screenOptions={{
           headerShown: false,
+          cardStyle: {
+            backgroundColor: '#000000',
+          },
         }}
       >
-        <Stack.Screen name="Home" component={HomeScreen} />
+        <Stack.Screen name="Voice" component={VoiceScreen} />
+        <Stack.Screen name="MainTabs" component={TabNavigator} />
       </Stack.Navigator>
     </NavigationContainer>
   );
