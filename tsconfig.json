@@ -3,7 +3,8 @@
     "target": "esnext",
     "module": "commonjs",
     "lib": [
-      "es2017"
+      "es2017",
+      "dom"
     ],
     "jsx": "react-native",
     "strict": true,
@@ -21,7 +22,11 @@
     },
     "moduleResolution": "node",
     "allowSyntheticDefaultImports": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "types": [
+      "react-native",
+      "jest"
+    ]
   },
   "exclude": [
     "node_modules",

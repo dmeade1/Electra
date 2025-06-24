@@ -7,6 +7,7 @@ import {
   ViewStyle,
   Dimensions,
   Easing,
+  Platform,
 } from 'react-native';
 import Svg, {
   Circle,
@@ -16,8 +17,6 @@ import Svg, {
   RadialGradient,
   Stop,
   ClipPath,
-  Filter,
-  FeGaussianBlur,
 } from 'react-native-svg';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -28,6 +27,7 @@ interface ElectraOrbProps {
   size?: number;
   isListening?: boolean;
   style?: ViewStyle;
+  quality?: 'low' | 'medium' | 'high' | 'ultra';
 }
 
 interface Point {
@@ -35,275 +35,233 @@ interface Point {
   y: number;
 }
 
-interface Branch {
-  path: string;
-  nodes: Point[];
-  width?: number;
-  opacity?: number;
-}
-
-interface NeuralConnection {
-  from: Point;
-  to: Point;
-  opacity: number;
-  path?: string;
-}
-
-interface Node {
-  x: number;
-  y: number;
-  size: number;
-  glowSize: number;
-}
+// Pre-calculate common values
+const NEURAL_CONNECTIONS_CACHE = new Map<string, string>();
 
 export const ElectraOrb: React.FC<ElectraOrbProps> = ({
   size = Math.min(screenWidth * 0.85, 340),
   isListening = false,
   style,
+  quality = 'medium',
 }) => {
   const centerX = size / 2;
   const centerY = size / 2;
-  // 90% of half-width as per description (keeping original's 48% for now as it works well visually)
   const radius = size * 0.48;
 
   // Animation refs
   const pulseAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
-  // Generate lightning pattern and neural map
-  const { branches, nodes, neuralMap } = useMemo(() => {
-    const branchList: Branch[] = [];
-    const nodesList: Node[] = [];
-    const neuralNodes: Point[] = [];
-    const neuralConnections: NeuralConnection[] = [];
+  // Performance settings based on quality
+  const qualitySettings = useMemo(() => ({
+    low: {
+      tendrils: 6,
+      tendrilSegments: 8,
+      forkProbability: 0,
+      neuralNodes: 0,
+      nodes: 15,
+      enableGlow: false,
+      enableNeuralWeb: false,
+      enablePulse: false,
+    },
+    medium: {
+      tendrils: 8,
+      tendrilSegments: 12,
+      forkProbability: 0.3,
+      neuralNodes: 150,
+      nodes: 30,
+      enableGlow: false,
+      enableNeuralWeb: true,
+      enablePulse: true,
+    },
+    high: {
+      tendrils: 12,
+      tendrilSegments: 16,
+      forkProbability: 0.5,
+      neuralNodes: 300,
+      nodes: 50,
+      enableGlow: true,
+      enableNeuralWeb: true,
+      enablePulse: true,
+    },
+    ultra: {
+      tendrils: 14,
+      tendrilSegments: 20,
+      forkProbability: 0.6,
+      neuralNodes: 400,
+      nodes: 80,
+      enableGlow: true,
+      enableNeuralWeb: true,
+      enablePulse: true,
+    },
+  }), []);
+
+  const settings = qualitySettings[quality];
+
+  // Optimized structure generation
+  const orbData = useMemo(() => {
+    const cacheKey = `${size}-${quality}`;
     
-    // Create background neural map grid - extends to edges (from original)
-    const gridSize = 24;
-    for (let i = 0; i < gridSize; i++) {
-      for (let j = 0; j < gridSize; j++) {
-        const x = (i / (gridSize - 1)) * radius * 2.2 - radius * 1.1 + centerX;
-        const y = (j / (gridSize - 1)) * radius * 2.2 - radius * 1.1 + centerY;
-        const dist = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
-        
-        if (dist <= radius * 1.05) {
-          const offsetX = (Math.random() - 0.5) * 12;
-          const offsetY = (Math.random() - 0.5) * 12;
-          const finalX = x + offsetX;
-          const finalY = y + offsetY;
-          const finalDist = Math.sqrt((finalX - centerX) ** 2 + (finalY - centerY) ** 2);
-          
-          if (finalDist <= radius) {
-            neuralNodes.push({ x: finalX, y: finalY });
-          }
-        }
-      }
-    }
+    // Lightning tendrils
+    const tendrils: string[] = [];
+    const nodes: Point[] = [];
     
-    // Add extra nodes near the edge (from original)
-    for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 20) {
-      for (let r = radius * 0.85; r <= radius; r += radius * 0.05) {
-        const x = centerX + Math.cos(angle) * r + (Math.random() - 0.5) * 10;
-        const y = centerY + Math.sin(angle) * r + (Math.random() - 0.5) * 10;
-        const dist = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
-        if (dist <= radius) {
-          neuralNodes.push({ x, y });
-        }
-      }
-    }
-    
-    // Connect nearby neural nodes (enhanced from original with curved paths)
-    neuralNodes.forEach((node, i) => {
-      neuralNodes.forEach((other, j) => {
-        if (i < j) {
-          const dist = Math.sqrt((node.x - other.x) ** 2 + (node.y - other.y) ** 2);
-          if (dist < radius * 0.15 && dist > radius * 0.01) {
-            const nodeDistFromCenter = Math.sqrt((node.x - centerX) ** 2 + (node.y - centerY) ** 2);
-            const otherDistFromCenter = Math.sqrt((other.x - centerX) ** 2 + (other.y - centerY) ** 2);
-            const avgDistFromCenter = (nodeDistFromCenter + otherDistFromCenter) / 2;
-            
-            // Higher opacity near edges, lower near center
-            const opacity = 0.1 + (avgDistFromCenter / radius) * 0.1;
-            
-            // Create curved path for web connections
-            const midX = (node.x + other.x) / 2 + (Math.random() - 0.5) * 5;
-            const midY = (node.y + other.y) / 2 + (Math.random() - 0.5) * 5;
-            const path = `M ${node.x} ${node.y} Q ${midX} ${midY} ${other.x} ${other.y}`;
-            
-            neuralConnections.push({ 
-              from: node, 
-              to: other,
-              opacity: opacity * (0.5 + Math.random() * 0.5),
-              path
-            });
-          }
-        }
-      });
-    });
-    
-    // Create 12-14 main lightning tendrils (as per description)
-    const tendrilCount = 12 + Math.floor(Math.random() * 3);
-    
-    const createLightningPath = (startAngle: number, variance: number = 0.3) => {
-      const points: Point[] = [];
-      let path = `M ${centerX} ${centerY}`;
+    // Generate main tendrils
+    for (let i = 0; i < settings.tendrils; i++) {
+      const angle = (Math.PI * 2 / settings.tendrils) * i;
+      const length = radius * 0.85;
       
-      const length = radius * (0.85 + Math.random() * 0.1);
-      const segments = 20;
+      // Build path with fewer segments
+      const pathSegments: string[] = [`M ${centerX} ${centerY}`];
       
-      let angle = startAngle;
-      let lastX = centerX;
-      let lastY = centerY;
-      
-      // Create main branch with sinusoidal wiggle (from description)
-      for (let i = 1; i <= segments; i++) {
-        const progress = i / segments;
+      for (let j = 1; j <= settings.tendrilSegments; j++) {
+        const progress = j / settings.tendrilSegments;
         const dist = length * progress;
         
-        // Sinusoidal wiggle with decreasing amplitude
-        const wiggleAmplitude = 0.15 * (1 - progress);
-        angle = startAngle + Math.sin(progress * Math.PI * 3) * wiggleAmplitude;
+        // Simplified wiggle
+        const wiggle = Math.sin(progress * Math.PI * 2.5) * 0.08 * (1 - progress);
+        const currentAngle = angle + wiggle;
         
-        const x = centerX + Math.cos(angle) * dist;
-        const y = centerY + Math.sin(angle) * dist;
+        const x = centerX + Math.cos(currentAngle) * dist;
+        const y = centerY + Math.sin(currentAngle) * dist;
         
-        // Smooth bezier curve
-        const cp1x = lastX + (x - lastX) * 0.3;
-        const cp1y = lastY + (y - lastY) * 0.3;
-        const cp2x = x - (x - lastX) * 0.3;
-        const cp2y = y - (y - lastY) * 0.3;
+        pathSegments.push(`L ${x.toFixed(1)} ${y.toFixed(1)}`);
         
-        path += ` C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${x} ${y}`;
-        
-        points.push({ x, y });
-        lastX = x;
-        lastY = y;
-        
-        // Add node at tendril end
-        if (i === segments) {
-          nodesList.push({
-            x,
-            y,
-            size: 1.5 + Math.random() * 1,
-            glowSize: 10 + Math.random() * 5,
-          });
+        // Add end node
+        if (j === settings.tendrilSegments) {
+          nodes.push({ x, y });
         }
         
-        // Fork branches (1-2 per tendril as per description)
-        if (i > segments * 0.4 && i < segments * 0.8 && Math.random() > 0.6) {
-          const subAngle = angle + (Math.random() - 0.5) * 0.8;
-          const subLength = (length - dist) * (0.4 + Math.random() * 0.3);
-          const subSegments = 8;
+        // Simplified forks
+        if (settings.forkProbability > 0 && 
+            j === Math.floor(settings.tendrilSegments * 0.6) && 
+            Math.random() < settings.forkProbability) {
+          const forkAngle = currentAngle + (Math.random() - 0.5) * 0.5;
+          const forkLength = length * 0.3;
+          const forkX = x + Math.cos(forkAngle) * forkLength;
+          const forkY = y + Math.sin(forkAngle) * forkLength;
           
-          let subPath = `M ${x} ${y}`;
-          let subLastX = x;
-          let subLastY = y;
-          let currentAngle = subAngle;
-          
-          for (let j = 1; j <= subSegments; j++) {
-            const subProgress = j / subSegments;
-            const subDist = subLength * subProgress;
-            
-            currentAngle += (Math.random() - 0.5) * 0.4;
-            
-            const subX = x + Math.cos(currentAngle) * subDist;
-            const subY = y + Math.sin(currentAngle) * subDist;
-            
-            const scp1x = subLastX + (subX - subLastX) * 0.3;
-            const scp1y = subLastY + (subY - subLastY) * 0.3;
-            const scp2x = subX - (subX - subLastX) * 0.3;
-            const scp2y = subY - (subY - subLastY) * 0.3;
-            
-            subPath += ` C ${scp1x} ${scp1y} ${scp2x} ${scp2y} ${subX} ${subY}`;
-            
-            if (j === subSegments) {
-              nodesList.push({
-                x: subX,
-                y: subY,
-                size: 1.2 + Math.random() * 0.8,
-                glowSize: 8 + Math.random() * 4,
-              });
-            }
-            
-            subLastX = subX;
-            subLastY = subY;
-          }
-          
-          branchList.push({ 
-            path: subPath, 
-            nodes: [],
-            width: 0.8 + Math.random() * 0.4,
-            opacity: 0.5 + Math.random() * 0.2
-          });
+          tendrils.push(`M ${x.toFixed(1)} ${y.toFixed(1)} L ${forkX.toFixed(1)} ${forkY.toFixed(1)}`);
+          nodes.push({ x: forkX, y: forkY });
         }
       }
       
-      return { 
-        path, 
-        nodes: points,
-        width: 1.5 + Math.random() * 0.5,
-        opacity: 0.6 + Math.random() * 0.1
-      };
-    };
-    
-    // Create main branches with equal angular spacing
-    for (let i = 0; i < tendrilCount; i++) {
-      const angle = (Math.PI * 2 / tendrilCount) * i;
-      const branch = createLightningPath(angle);
-      branchList.push(branch);
+      tendrils.push(pathSegments.join(' '));
     }
     
-    // Add nodes in density ring (40-80% of radius as per description)
+    // Neural web - organic curved connections
+    let neuralWebPath = '';
+    if (settings.enableNeuralWeb && settings.neuralNodes > 0) {
+      const cached = NEURAL_CONNECTIONS_CACHE.get(cacheKey);
+      if (cached) {
+        neuralWebPath = cached;
+      } else {
+        const webSegments: string[] = [];
+        const neuralNodesList: Point[] = [];
+        
+        // Generate neural nodes in organic clusters
+        const clusters = 8;
+        const nodesPerCluster = Math.floor(settings.neuralNodes / clusters);
+        
+        for (let c = 0; c < clusters; c++) {
+          const clusterAngle = (Math.PI * 2 / clusters) * c;
+          const clusterRadius = radius * (0.3 + Math.random() * 0.4);
+          const clusterX = centerX + Math.cos(clusterAngle) * clusterRadius;
+          const clusterY = centerY + Math.sin(clusterAngle) * clusterRadius;
+          
+          for (let n = 0; n < nodesPerCluster; n++) {
+            const nodeAngle = Math.random() * Math.PI * 2;
+            const nodeRadius = Math.random() * radius * 0.15;
+            const x = clusterX + Math.cos(nodeAngle) * nodeRadius;
+            const y = clusterY + Math.sin(nodeAngle) * nodeRadius;
+            
+            // Check if node is within orb bounds
+            const distFromCenter = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
+            if (distFromCenter <= radius * 0.95) {
+              neuralNodesList.push({ x, y });
+            }
+          }
+        }
+        
+        // Create organic connections between nearby nodes
+        neuralNodesList.forEach((node, i) => {
+          // Find 2-4 nearest neighbors
+          const distances = neuralNodesList
+            .map((other, j) => ({
+              index: j,
+              dist: Math.sqrt((node.x - other.x) ** 2 + (node.y - other.y) ** 2)
+            }))
+            .filter(d => d.index !== i && d.dist < radius * 0.25 && d.dist > radius * 0.02)
+            .sort((a, b) => a.dist - b.dist)
+            .slice(0, 2 + Math.floor(Math.random() * 2));
+          
+          distances.forEach(({ index }) => {
+            if (index > i) { // Avoid duplicate connections
+              const other = neuralNodesList[index];
+              
+              // Create curved path using quadratic bezier
+              const midX = (node.x + other.x) / 2;
+              const midY = (node.y + other.y) / 2;
+              
+              // Add organic curve by offsetting the control point
+              const curvature = 0.2;
+              const perpX = -(other.y - node.y) * curvature;
+              const perpY = (other.x - node.x) * curvature;
+              
+              const controlX = midX + perpX * (Math.random() - 0.5) * 2;
+              const controlY = midY + perpY * (Math.random() - 0.5) * 2;
+              
+              webSegments.push(
+                `M ${node.x.toFixed(1)} ${node.y.toFixed(1)} Q ${controlX.toFixed(1)} ${controlY.toFixed(1)} ${other.x.toFixed(1)} ${other.y.toFixed(1)}`
+              );
+            }
+          });
+        });
+        
+        neuralWebPath = webSegments.join(' ');
+        NEURAL_CONNECTIONS_CACHE.set(cacheKey, neuralWebPath);
+      }
+    }
+    
+    // Distributed nodes
     const innerRadius = radius * 0.4;
     const outerRadius = radius * 0.8;
-    for (let i = 0; i < 50; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const r = innerRadius + Math.random() * (outerRadius - innerRadius);
-      nodesList.push({
+    for (let i = 0; i < settings.nodes; i++) {
+      const angle = (Math.PI * 2 / settings.nodes) * i;
+      const r = innerRadius + (outerRadius - innerRadius) * ((i % 3) / 2);
+      nodes.push({
         x: centerX + Math.cos(angle) * r,
         y: centerY + Math.sin(angle) * r,
-        size: 1.5 + Math.random() * 1,
-        glowSize: 6 + Math.random() * 9,
       });
     }
     
-    // Add central bright node
-    nodesList.push({
-      x: centerX,
-      y: centerY,
-      size: 8,
-      glowSize: 50,
-    });
+    // Center node
+    nodes.push({ x: centerX, y: centerY });
     
-    return { 
-      branches: branchList, 
-      nodes: nodesList, 
-      neuralMap: { nodes: neuralNodes, connections: neuralConnections } 
+    return {
+      tendrils: tendrils.join(' '),
+      nodes,
+      neuralWebPath,
     };
-  }, [size, centerX, centerY, radius]);
+  }, [size, centerX, centerY, radius, settings, qualitySettings]);
 
-  // Gentle pulse animation
+  // Optimized pulse animation
   useEffect(() => {
+    if (!settings.enablePulse) return;
+    
     const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 3000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: false,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 0,
-          duration: 3000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: false,
-        }),
-      ])
+      Animated.timing(pulseAnim, {
+        toValue: 1,
+        duration: 4000,
+        easing: Easing.inOut(Easing.ease),
+        useNativeDriver: true,
+      })
     );
     animation.start();
     return () => animation.stop();
-  }, [pulseAnim]);
+  }, [pulseAnim, settings.enablePulse]);
 
-  // Voice activation scale
+  // Voice activation
   useEffect(() => {
     Animated.spring(scaleAnim, {
       toValue: isListening ? 1.05 : 1,
@@ -324,162 +282,100 @@ export const ElectraOrb: React.FC<ElectraOrbProps> = ({
         ]}
       >
         <View style={[styles.orb, { width: size, height: size }]}>
-          <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+          <Svg 
+            width={size} 
+            height={size} 
+            viewBox={`0 0 ${size} ${size}`}
+            renderToHardwareTextureAndroid={Platform.OS === 'android'}
+            shouldRasterizeIOS={Platform.OS === 'ios'}
+          >
             <Defs>
-              {/* Main orb gradient - exact colors from description */}
-              <RadialGradient id="orbGradient" cx="50%" cy="50%">
+              {/* Simplified gradients */}
+              <RadialGradient id="orb" cx="50%" cy="50%">
                 <Stop offset="0%" stopColor="#04a3f5" stopOpacity="1" />
-                <Stop offset="30%" stopColor="#007bff" stopOpacity="0.9" />
-                <Stop offset="70%" stopColor="#007bff" stopOpacity="0.5" />
-                <Stop offset="100%" stopColor="rgba(0,40,90,0.1)" stopOpacity="0" />
+                <Stop offset="50%" stopColor="#007bff" stopOpacity="0.7" />
+                <Stop offset="100%" stopColor="#001830" stopOpacity="0" />
               </RadialGradient>
 
-              {/* Center core gradient */}
-              <RadialGradient id="centerCore" cx="50%" cy="50%">
-                <Stop offset="0%" stopColor="#04a3f5" stopOpacity="1" />
-                <Stop offset="40%" stopColor="#00faff" stopOpacity="0.8" />
+              <RadialGradient id="center" cx="50%" cy="50%">
+                <Stop offset="0%" stopColor="#00faff" stopOpacity="1" />
                 <Stop offset="100%" stopColor="#007bff" stopOpacity="0" />
               </RadialGradient>
 
-              {/* Node glow gradient */}
-              <RadialGradient id="nodeGlow" cx="50%" cy="50%">
-                <Stop offset="0%" stopColor="#007bff" stopOpacity="0.9" />
-                <Stop offset="50%" stopColor="#007bff" stopOpacity="0.5" />
-                <Stop offset="100%" stopColor="#007bff" stopOpacity="0" />
-              </RadialGradient>
-
-              {/* Tendril glow filter */}
-              <Filter id="tendrilGlow">
-                <FeGaussianBlur stdDeviation="3" />
-              </Filter>
-
-              <ClipPath id="orbClip">
+              <ClipPath id="clip">
                 <Circle cx={centerX} cy={centerY} r={radius} />
               </ClipPath>
             </Defs>
 
-            {/* Pure black background (#000000) */}
-            <Circle cx={centerX} cy={centerY} r={size / 2} fill="#000000" />
+            {/* Black background */}
+            <Circle cx={centerX} cy={centerY} r={radius} fill="#000000" />
 
-            <G clipPath="url(#orbClip)">
-              {/* Main orb with proper gradient */}
-              <Circle cx={centerX} cy={centerY} r={radius} fill="url(#orbGradient)" />
+            <G clipPath="url(#clip)">
+              {/* Main orb */}
+              <Circle cx={centerX} cy={centerY} r={radius} fill="url(#orb)" />
 
-              {/* Inner aura bloom */}
-              <AnimatedCircle
-                cx={centerX}
-                cy={centerY}
-                r={100}
-                fill="rgba(0,255,255,0.05)"
-                opacity={pulseAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0.8, 1],
-                })}
+              {/* Neural web with organic curves */}
+              {settings.enableNeuralWeb && orbData.neuralWebPath && (
+                <G opacity={0.6}>
+                  <Path
+                    d={orbData.neuralWebPath}
+                    stroke="rgba(0,123,255,0.15)"
+                    strokeWidth={0.5}
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </G>
+              )}
+
+              {/* All tendrils as single path */}
+              <Path
+                d={orbData.tendrils}
+                stroke="#007bff"
+                strokeWidth={1.5}
+                fill="none"
+                opacity={0.7}
+                strokeLinecap="round"
               />
 
-              {/* Neural network with curved paths */}
-              <G>
-                {neuralMap.connections.map((conn, index) => {
-                  const path = conn.path || `M ${conn.from.x} ${conn.from.y} L ${conn.to.x} ${conn.to.y}`;
-                  return (
-                    <Path
-                      key={`neural-${index}`}
-                      d={path}
-                      stroke="rgba(0,123,255,0.15)"
-                      strokeWidth={0.4}
-                      opacity={conn.opacity}
-                      fill="none"
-                    />
-                  );
-                })}
-              </G>
+              {/* Optimized nodes */}
+              {orbData.nodes.map((node, index) => {
+                const isCenter = index === orbData.nodes.length - 1;
+                return (
+                  <Circle
+                    key={index}
+                    cx={node.x}
+                    cy={node.y}
+                    r={isCenter ? 6 : 2}
+                    fill={isCenter ? "#04a3f5" : "#007bff"}
+                    opacity={isCenter ? 1 : 0.8}
+                  />
+                );
+              })}
 
-              {/* Lightning branches with proper glow */}
-              <G>
-                {branches.map((branch, index) => (
-                  <G key={`branch-${index}`}>
-                    {/* Shadow blur glow */}
-                    <Path
-                      d={branch.path}
-                      stroke="rgba(0,123,255,0.3)"
-                      strokeWidth={(branch.width || 1.5) * 8}
-                      fill="none"
-                      opacity={(branch.opacity || 0.7) * 0.3}
-                      strokeLinecap="round"
-                      filter="url(#tendrilGlow)"
-                    />
-                    {/* Main tendril */}
-                    <Path
-                      d={branch.path}
-                      stroke="rgba(0,123,255,0.7)"
-                      strokeWidth={branch.width || 1.5}
-                      fill="none"
-                      opacity={branch.opacity || 0.7}
-                      strokeLinecap="round"
-                    />
-                  </G>
-                ))}
-              </G>
-
-              {/* Glowing nodes */}
-              <G>
-                {nodes.map((node, index) => {
-                  const isCenter = node.x === centerX && node.y === centerY;
-                  
-                  return (
-                    <G key={`node-${index}`}>
-                      {/* Node glow */}
-                      <Circle
-                        cx={node.x}
-                        cy={node.y}
-                        r={node.glowSize}
-                        fill="url(#nodeGlow)"
-                        opacity={0.5}
-                      />
-                      {/* Node core */}
-                      <Circle
-                        cx={node.x}
-                        cy={node.y}
-                        r={node.size}
-                        fill={isCenter ? "#04a3f5" : "rgba(0,123,255,0.9)"}
-                        opacity={1}
-                      />
-                    </G>
-                  );
-                })}
-              </G>
-
-              {/* Central bright core (8px radius as per description) */}
-              <G>
+              {/* Animated center pulse */}
+              {settings.enablePulse && (
                 <AnimatedCircle
                   cx={centerX}
                   cy={centerY}
-                  r={50}
-                  fill="url(#centerCore)"
+                  r={radius * 0.3}
+                  fill="url(#center)"
                   opacity={pulseAnim.interpolate({
                     inputRange: [0, 1],
-                    outputRange: [0.6, 0.8],
+                    outputRange: [0.3, 0.6],
                   })}
                 />
-                <Circle
-                  cx={centerX}
-                  cy={centerY}
-                  r={8}
-                  fill="#04a3f5"
-                  opacity={1}
-                />
-              </G>
+              )}
             </G>
 
-            {/* Edge highlight with proper feathering */}
+            {/* Simple edge */}
             <Circle
               cx={centerX}
               cy={centerY}
               r={radius}
-              stroke="rgba(0,123,255,0.4)"
-              strokeWidth={2}
+              stroke="rgba(0,123,255,0.3)"
+              strokeWidth={1}
               fill="none"
-              opacity={0.8}
             />
           </Svg>
         </View>
